@@ -4,16 +4,62 @@ STRM服务模块
 参考: AlistAutoStrm mission.go
 """
 
-from app.models.strm import StrmModel
+from app.services.strm_generator import StrmGenerator
+from app.services.quark_service import QuarkService
+from app.core.database import Database
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-class StrmGenerator:
-    """STRM生成器（占位，P3阶段实现）"""
+class StrmService:
+    """STRM服务"""
 
-    async def scan_directory(self, remote_path: str, local_path: str, recursive: bool = True) -> list[StrmModel]:
+    def __init__(
+        self,
+        cookie: str,
+        database: Database,
+        base_url: str = "http://localhost:5244",
+        exts: list = None,
+        alt_exts: list = None,
+        create_sub_directory: bool = False,
+        recursive: bool = True,
+        force_refresh: bool = False
+    ):
+        """
+        初始化STRM服务
+
+        Args:
+            cookie: 夸克Cookie
+            database: 数据库实例
+            base_url: 基础URL
+            exts: 视频扩展名列表
+            alt_exts: 字幕扩展名列表
+            create_sub_directory: 是否创建子目录
+            recursive: 是否递归扫描
+            force_refresh: 是否强制刷新
+        """
+        if exts is None:
+            exts = [".mp4", ".mkv", ".avi", ".mov"]
+        if alt_exts is None:
+            alt_exts = [".srt", ".ass"]
+
+        self.quark_service = QuarkService(cookie)
+        self.database = database
+        self.base_url = base_url
+        self.exts = exts
+        self.alt_exts = alt_exts
+        self.create_sub_directory = create_sub_directory
+        self.recursive = recursive
+        self.force_refresh = force_refresh
+        logger.info("StrmService initialized")
+
+    async def scan_directory(
+        self,
+        remote_path: str,
+        local_path: str,
+        concurrent_limit: int = 5
+    ):
         """
         扫描目录并生成STRM
 
@@ -22,30 +68,30 @@ class StrmGenerator:
         Args:
             remote_path: 远程目录路径
             local_path: 本地目录路径
-            recursive: 是否递归扫描
+            concurrent_limit: 并发限制
 
         Returns:
             STRM模型列表
         """
-        logger.warning("StrmGenerator.scan_directory not implemented yet")
-        return []
+        generator = StrmGenerator(
+            quark_service=self.quark_service,
+            database=self.database,
+            base_url=self.base_url,
+            exts=self.exts,
+            alt_exts=self.alt_exts,
+            create_sub_directory=self.create_sub_directory,
+            recursive=self.recursive,
+            force_refresh=self.force_refresh
+        )
 
+        strms = await generator.scan_directory(remote_path, local_path, concurrent_limit)
 
-class ProxyService:
-    """代理服务（占位，P4阶段实现）"""
+        # 保存扫描记录
+        self.database.save_record(remote_path)
 
-    async def proxy_stream(self, file_id: str, range_header: str = None):
-        """
-        代理视频流
+        return strms
 
-        参考: MediaHelp proxy.py
-
-        Args:
-            file_id: 文件ID
-            range_header: Range请求头
-
-        Returns:
-            响应对象
-        """
-        logger.warning("ProxyService.proxy_stream not implemented yet")
-        raise NotImplementedError("ProxyService.proxy_stream not implemented yet")
+    async def close(self):
+        """关闭服务"""
+        await self.quark_service.close()
+        logger.debug("StrmService closed")
