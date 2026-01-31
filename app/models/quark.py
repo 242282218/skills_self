@@ -4,7 +4,7 @@
 参考: OpenList quark_uc/types.go
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
 
@@ -20,7 +20,7 @@ class FileModel(BaseModel):
     size: int = Field(0, alias="size", description="文件大小")
     l_created_at: int = Field(0, alias="l_created_at", description="本地创建时间")
     l_updated_at: int = Field(0, alias="l_updated_at", description="本地更新时间")
-    is_dir: bool = Field(False, alias="file", description="是否为目录 (注意: OpenList中file=True表示文件)")
+    file: bool = Field(False, alias="file", description="是否为文件 (True=文件, False=目录)")
     created_at: int = Field(0, alias="created_at", description="创建时间")
     updated_at: int = Field(0, alias="updated_at", description="更新时间")
     mime_type: Optional[str] = Field(None, alias="mime_type", description="MIME类型")
@@ -35,6 +35,11 @@ class FileModel(BaseModel):
     def id(self) -> str:
         """获取文件ID"""
         return self.fid
+
+    @property
+    def is_dir(self) -> bool:
+        """是否为目录"""
+        return not self.file
 
 
 class DownResp(BaseModel):

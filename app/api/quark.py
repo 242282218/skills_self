@@ -18,7 +18,7 @@ async def get_files(parent: str, only_video: bool = False):
     参考: OpenList quark_uc/util.go:69-111
     """
     try:
-        service = QuarkService()
+        service = QuarkService(cookie="")
         files = await service.get_files(parent, only_video)
         await service.close()
         return {"files": files, "count": len(files)}
@@ -35,7 +35,7 @@ async def get_download_link(file_id: str):
     参考: OpenList quark_uc/util.go:113-137
     """
     try:
-        service = QuarkService()
+        service = QuarkService(cookie="")
         link = await service.get_download_link(file_id)
         await service.close()
         return {"url": link.url, "headers": link.headers}
@@ -52,10 +52,10 @@ async def get_transcoding_link(file_id: str):
     参考: OpenList quark_uc/util.go:139-168
     """
     try:
-        service = QuarkService()
+        service = QuarkService(cookie="")
         link = await service.get_transcoding_link(file_id)
         await service.close()
-        return {"url": link.url, "headers": link.headers}
+        return {"url": link.url, "headers": link.headers, "content_length": link.content_length}
     except Exception as e:
         logger.error(f"Failed to get transcoding link: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
