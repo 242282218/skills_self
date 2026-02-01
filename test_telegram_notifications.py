@@ -14,8 +14,8 @@ from notifier import Notifier, NotificationMessage
 from datetime import datetime
 
 # Telegram 配置
-TELEGRAM_BOT_TOKEN = "5807378696:AAHDfl1nCtTkhk9bvtvog3cjwByYjgv0grE"
-TELEGRAM_USER_ID = "5675490499"
+TELEGRAM_BOT_TOKEN = ""
+TELEGRAM_USER_ID = ""
 
 
 def test_update_success():
