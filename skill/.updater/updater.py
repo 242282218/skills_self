@@ -27,6 +27,20 @@ logging.basicConfig(
 logger = logging.getLogger('skill-updater')
 
 
+# 技能类型映射（根据路径判断 global/project）
+SKILL_TYPE_MAP = {
+    'architecture': 'global',
+    'code-comprehension': 'global',
+    'debugging': 'global',
+    'documentation': 'global',
+    'meta': 'global',
+    'refactoring': 'global',
+    'devops': 'project',
+    'frontend': 'project',
+    'testing': 'project',
+}
+
+
 class UpdateType(Enum):
     """更新类型"""
     BREAKING_CHANGE = "breaking_change"
@@ -87,6 +101,59 @@ class SkillUpdater:
         # GitHub API Token
         self.github_token = os.getenv('GITHUB_TOKEN', '')
         
+    def _get_skill_type(self, category: str) -> str:
+        """根据类别获取技能类型（global/project）"""
+        return SKILL_TYPE_MAP.get(category, 'project')
+    
+    def _convert_to_standard_format(self, content: str) -> str:
+        """将复杂格式转换为标准格式（只有name和description的YAML frontmatter）"""
+        if not content.startswith('---'):
+            return content
+        
+        try:
+            # 解析 frontmatter
+            parts = content.split('---', 2)
+            if len(parts) < 3:
+                return content
+            
+            _, frontmatter, body = parts
+            metadata = yaml.safe_load(frontmatter)
+            
+            if not metadata:
+                return content
+            
+            # 提取关键信息
+            name = metadata.get('name', '')
+            description = metadata.get('description', '')
+            
+            # 如果没有description，尝试从其他字段或正文提取
+            if not description:
+                # 尝试从正文第一行提取（通常是标题后的简短描述）
+                body_lines = body.strip().split('\n')
+                for line in body_lines:
+                    line = line.strip()
+                    # 跳过空行和标题
+                    if line and not line.startswith('#') and len(line) > 10:
+                        description = line[:100]  # 取前100字符
+                        break
+                
+                # 如果还没找到，使用默认描述
+                if not description:
+                    description = f"{name} skill"
+            
+            # 构建标准格式的 YAML frontmatter
+            standard_frontmatter = f"""---
+name: {name}
+description: {description}
+---"""
+            
+            # 返回标准格式
+            return standard_frontmatter + body
+            
+        except Exception as e:
+            logger.warning(f"转换标准格式失败: {e}")
+            return content
+    
     def _load_config(self, config_path: str) -> Dict:
         """加载配置文件"""
         try:
@@ -361,12 +428,13 @@ class SkillUpdater:
             return False
     
     def create_skill_zips_in_all(self):
-        """在all目录下为每个技能创建压缩包（只保留压缩包）"""
+        """在all目录下为每个技能创建压缩包（只保留压缩包，使用标准格式和类型前缀）"""
         logger.info("开始为每个技能创建压缩包到all目录...")
         
         import zipfile
         import shutil
         import os
+        import io
         
         # 获取skill目录的绝对路径
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -388,6 +456,9 @@ class SkillUpdater:
             for category in categories:
                 category_path = os.path.join(skill_dir, category)
                 
+                # 获取技能类型（global/project）
+                skill_type = self._get_skill_type(category)
+                
                 # 遍历类别下的所有技能目录
                 for skill_name in os.listdir(category_path):
                     skill_path = os.path.join(category_path, skill_name)
@@ -395,15 +466,27 @@ class SkillUpdater:
                     
                     # 检查是否是技能目录且包含SKILL.md
                     if os.path.isdir(skill_path) and os.path.exists(skill_md_path):
-                        # 创建技能压缩包路径
-                        zip_path = os.path.join(all_dir, f"{skill_name}.zip")
-                        
+                        # 读取并转换为标准格式
                         try:
+                            with open(skill_md_path, 'r', encoding='utf-8') as f:
+                                original_content = f.read()
+                            
+                            # 转换为标准格式
+                            standard_content = self._convert_to_standard_format(original_content)
+                            
+                            # 创建带类型前缀的技能名称
+                            typed_skill_name = f"{skill_type}-{skill_name}"
+                            
+                            # 创建技能压缩包路径
+                            zip_path = os.path.join(all_dir, f"{typed_skill_name}.zip")
+                            
+                            # 创建压缩包，内部使用带类型前缀的目录名
                             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-                                # 直接将SKILL.md添加到压缩包根目录
-                                zf.write(skill_md_path, 'SKILL.md')
-                                logger.info(f"已创建技能压缩包: {skill_name}.zip")
+                                # 将标准格式的SKILL.md添加到压缩包，使用带类型前缀的路径
+                                zf.writestr(f"{typed_skill_name}/SKILL.md", standard_content)
+                                logger.info(f"已创建技能压缩包: {typed_skill_name}.zip")
                                 skill_count += 1
+                                
                         except Exception as e:
                             logger.error(f"创建 {skill_name}.zip 失败: {e}")
                             continue
