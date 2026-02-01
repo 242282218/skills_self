@@ -174,7 +174,18 @@ ${{ steps.updater.outputs.changes }}
             -d "text=${MESSAGE}" \
             -d "parse_mode=Markdown"
       
-      # 10. Telegram 通知 - 试运行模式
+      # 10. 打包 all 目录为 zip 文件
+      - name: Package skills for import
+        if: steps.updater.outputs.has_changes == 'true' && github.event.inputs.dry_run != 'true'
+        run: |
+          cd skill
+          
+          # 打包 all 目录
+          zip -r ../skills_all.zip all
+          
+          echo "已生成打包文件: skills_all.zip"
+
+      # 11. Telegram 通知 - 试运行模式
       - name: Send Telegram notification - Dry Run
         if: github.event.inputs.dry_run == 'true'
         run: |

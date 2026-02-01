@@ -1,6 +1,6 @@
 ---
 name: pytest-design
-version: 1.0.0
+version: 1.0.1
 scope: testing
 trigger:
   - when: 用户需要设计 pytest 测试时

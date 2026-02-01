@@ -1,52 +1,24 @@
 ---
 name: api-design
-version: 1.0.0
-scope: architecture
-trigger:
-  - when: 用户需要设计 API 时
-  - when: 用户询问"如何设计这个接口"时
-  - when: 需要 API 评审时
-capabilities:
-  - 设计 RESTful API
-  - 设计 GraphQL API
-  - 定义请求/响应格式
-  - 设计错误处理
-  - 生成 API 文档
-constraints:
-  - 遵循行业标准
-  - 保持向后兼容
-  - 考虑安全性
-  - 支持版本控制
-inputs:
-  - api_requirements: API 需求
-  - api_type: API 类型（REST/GraphQL）
-  - auth_requirements: 认证需求
-outputs:
-  - api_spec: API 规范
-  - endpoint_design: 端点设计
-  - schema_definition: 数据模型
-  - error_codes: 错误码定义
-references:
-  - project: FastAPI
-    url: https://github.com/fastapi/fastapi
-  - project: OpenAPI
-    capability: API specification
+description: 设计清晰、易用的API接口，包括RESTful和GraphQL API的设计、请求响应格式定义、错误处理和API文档生成
 ---
 
-# API Design
+# API Design Skill
 
-设计清晰、易用的 API 接口。
+## 能力
+- 设计RESTful API
+- 设计GraphQL API
+- 定义请求/响应格式
+- 设计错误处理
+- 生成API文档
 
-## When to Invoke
+## 约束
+- 遵循行业标准
+- 保持向后兼容
+- 考虑安全性
+- 支持版本控制
 
-- 设计新 API
-- API 版本升级
-- 第三方接口设计
-- API 文档生成
-- 接口评审
-
-## Input Format
-
+## 输入格式
 ```yaml
 api_requirements:
   resources:
@@ -60,8 +32,7 @@ auth_requirements:
   scopes: ["read", "write"]
 ```
 
-## Output Format
-
+## 输出格式
 ```yaml
 api_spec:
   openapi: "3.0.0"
@@ -103,31 +74,19 @@ error_codes:
     description: "未授权访问"
 ```
 
-## Examples
+## 使用场景
+- 设计新API
+- API版本升级
+- 第三方接口设计
+- API文档生成
+- 接口评审
 
-### Example 1: REST API
-
-**Input:** 用户管理 API
-
-**Output:**
-- 资源 URI 设计
-- HTTP 方法映射
-- 请求/响应格式
-- 分页和过滤
-
-### Example 2: GraphQL API
-
-**Input:** 数据查询 API
-
-**Output:**
-- Schema 设计
-- Query/Mutation 定义
-- 类型系统
-- 解析器设计
-
-## Best Practices
-
-1. **资源导向**: URL 表示资源，HTTP 方法表示操作
+## 最佳实践
+1. **资源导向**: URL表示资源，HTTP方法表示操作
 2. **一致性**: 命名和格式保持一致
-3. **版本控制**: URL 或 Header 中包含版本
-4. **文档完善**: 自动生成 OpenAPI 文档
+3. **版本控制**: URL或Header中包含版本
+4. **文档完善**: 自动生成OpenAPI文档
+
+## 参考项目
+- FastAPI: https://github.com/fastapi/fastapi
+- OpenAPI: API specification

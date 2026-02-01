@@ -1,0 +1,6 @@
+[
+  {
+    "project_name": "CMake",
+    "version": "v4.2.3",
+    "release_notes": "See also the [release notes](https://cmake.org/cmake/help/latest/release/4.2.html) and [release milestone](https://gitlab.kitware.com/cmake/cmake/-/milestones/192).\n\nPGP sig by [2D2CEF1034921684](http://pool.sks-keyservers.net:11371/pks/lookup?op=get&search=0xCBA23971357C2E6590D9EFD3EC8FEF3A7BFB4EDA)",
+    "published_at": 

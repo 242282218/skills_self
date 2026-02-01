@@ -1,0 +1,6 @@
+[
+  {
+    "project_name": "react",
+    "version": "v19.2.4",
+    "release_notes": "## React Server Components\r\n\r\n- Add more DoS mitigations to Server Actions, and harden Server Components ([#35632](https://github.com/facebook/react/pull/35632) by @gnoff, @lubieowoce, @sebmarkbage, @unstubbable)",
+    "published_at": 

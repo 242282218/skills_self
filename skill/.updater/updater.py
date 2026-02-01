@@ -360,6 +360,60 @@ class SkillUpdater:
             logger.error(f"应用更新失败: {e}")
             return False
     
+    def create_skill_zips_in_all(self):
+        """在all目录下为每个技能创建压缩包（只保留压缩包）"""
+        logger.info("开始为每个技能创建压缩包到all目录...")
+        
+        import zipfile
+        import shutil
+        import os
+        
+        # 获取skill目录的绝对路径
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        skill_dir = os.path.dirname(script_dir)
+        all_dir = os.path.join(skill_dir, 'all')
+        
+        # 清理并重建all目录
+        if os.path.exists(all_dir):
+            shutil.rmtree(all_dir)
+        os.makedirs(all_dir, exist_ok=True)
+        
+        # 获取所有技能类别目录
+        skill_count = 0
+        try:
+            categories = [d for d in os.listdir(skill_dir) 
+                         if os.path.isdir(os.path.join(skill_dir, d)) 
+                         and d not in ['all', '.updater']]
+            
+            for category in categories:
+                category_path = os.path.join(skill_dir, category)
+                
+                # 遍历类别下的所有技能目录
+                for skill_name in os.listdir(category_path):
+                    skill_path = os.path.join(category_path, skill_name)
+                    skill_md_path = os.path.join(skill_path, 'SKILL.md')
+                    
+                    # 检查是否是技能目录且包含SKILL.md
+                    if os.path.isdir(skill_path) and os.path.exists(skill_md_path):
+                        # 创建技能压缩包路径
+                        zip_path = os.path.join(all_dir, f"{skill_name}.zip")
+                        
+                        try:
+                            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                                # 直接将SKILL.md添加到压缩包根目录
+                                zf.write(skill_md_path, 'SKILL.md')
+                                logger.info(f"已创建技能压缩包: {skill_name}.zip")
+                                skill_count += 1
+                        except Exception as e:
+                            logger.error(f"创建 {skill_name}.zip 失败: {e}")
+                            continue
+            
+            logger.info(f"所有技能压缩包创建完成，共 {skill_count} 个")
+            return True
+        except Exception as e:
+            logger.error(f"创建技能压缩包失败: {e}")
+            return False
+
     def run(self, dry_run: bool = False):
         """运行更新流程"""
         logger.info("开始检查 Skill 更新...")
@@ -369,16 +423,19 @@ class SkillUpdater:
         
         if not update_plans:
             logger.info("没有需要更新的 Skill")
-            return
+        else:
+            logger.info(f"发现 {len(update_plans)} 个需要更新的 Skill")
+            
+            # 应用更新
+            for plan in update_plans:
+                if dry_run:
+                    logger.info(f"[Dry Run] 将更新: {plan.skill_name} -> {plan.new_version}")
+                else:
+                    self.apply_update(plan)
         
-        logger.info(f"发现 {len(update_plans)} 个需要更新的 Skill")
-        
-        # 应用更新
-        for plan in update_plans:
-            if dry_run:
-                logger.info(f"[Dry Run] 将更新: {plan.skill_name} -> {plan.new_version}")
-            else:
-                self.apply_update(plan)
+        # 创建技能压缩包到all目录（只保留压缩包）
+        if not dry_run:
+            self.create_skill_zips_in_all()
         
         logger.info("更新检查完成")
 

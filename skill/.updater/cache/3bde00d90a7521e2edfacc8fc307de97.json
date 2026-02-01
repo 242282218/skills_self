@@ -1,0 +1,6 @@
+[
+  {
+    "project_name": "fastapi",
+    "version": "0.128.0",
+    "release_notes": "### Breaking Changes\r\n\r\n* ➖ Drop support for `pydantic.v1`. PR [#14609](https://github.com/fastapi/fastapi/pull/14609) by [@tiangolo](https://github.com/tiangolo).\r\n\r\n### Internal\r\n\r\n* ✅ Run performance tests only on Pydantic v2. PR [#14608](https://github.com/fastapi/fastapi/pull/14608) by [@tiangolo](https://github.com/tiangolo).",
+    "published_at": 
