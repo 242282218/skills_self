@@ -1,0 +1,215 @@
+name: Skill Auto Updater
+
+on:
+  # 定时触发：每周日凌晨 2 点（UTC）
+  schedule:
+    - cron: '0 2 * * 0'
+  
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '试运行模式（不实际应用更新）'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      skill_path:
+        description: '指定更新的 Skill 路径（可选）'
+        required: false
+        default: ''
+        type: string
+
+env:
+  # Telegram 配置（从 Secrets 读取）
+  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+  TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
+
+jobs:
+  update-skills:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1. 检出代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      # 2. 设置 Python 环境
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      # 3. 安装依赖
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml requests
+      
+      # 4. 配置 Git
+      - name: Configure Git
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+      
+      # 5. 运行 Skill 更新器
+      - name: Run Skill Updater
+        id: updater
+        run: |
+          cd skill
+          
+          # 构建命令参数
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          if [ -n "${{ github.event.inputs.skill_path }}" ]; then
+            ARGS="$ARGS --skill ${{ github.event.inputs.skill_path }}"
+          fi
+          
+          # 运行更新脚本
+          python .updater/updater.py $ARGS
+          
+          # 检查是否有变更
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "changes=$(git diff --stat)" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      # 6. 提交变更
+      - name: Commit changes
+        if: steps.updater.outputs.has_changes == 'true' && github.event.inputs.dry_run != 'true'
+        run: |
+          cd skill
+          
+          # 添加所有变更
+          git add -A
+          
+          # 生成提交信息
+          COMMIT_MSG="Auto-update: Skill updates $(date +'%Y-%m-%d')
+
+          Changes:
+          ${{ steps.updater.outputs.changes }}
+          
+          Triggered by: ${{ github.event_name }}
+          Workflow run: ${{ github.run_id }}"
+          
+          git commit -m "$COMMIT_MSG"
+          
+          # 推送变更
+          git push
+      
+      # 7. 生成更新报告
+      - name: Generate update report
+        if: steps.updater.outputs.has_changes == 'true'
+        run: |
+          REPORT_FILE="update_report_$(date +'%Y%m%d_%H%M%S').md"
+          
+          cat > $REPORT_FILE << 'EOF'
+          # Skill 自动更新报告
+          
+          ## 更新时间
+          $(date +'%Y-%m-%d %H:%M:%S')
+          
+          ## 触发方式
+          ${{ github.event_name }}
+          
+          ## 更新内容
+          ${{ steps.updater.outputs.changes }}
+          
+          ## 工作流信息
+          - Run ID: ${{ github.run_id }}
+          - Commit: ${{ github.sha }}
+          
+          EOF
+          
+          echo "report_file=$REPORT_FILE" >> $GITHUB_ENV
+      
+      # 8. Telegram 通知 - 更新成功
+      - name: Send Telegram notification - Success
+        if: steps.updater.outputs.has_changes == 'true' && github.event.inputs.dry_run != 'true'
+        run: |
+          MESSAGE="🎉 *Skill 自动更新成功*
+
+📅 时间: $(date +'%Y-%m-%d %H:%M:%S')
+🔄 触发: ${{ github.event_name }}
+📊 变更:
+\`\`\`
+${{ steps.updater.outputs.changes }}
+\`\`\`
+
+🔗 查看详情: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          curl -s -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_USER_ID}" \
+            -d "text=${MESSAGE}" \
+            -d "parse_mode=Markdown" \
+            -d "disable_web_page_preview=true"
+      
+      # 9. Telegram 通知 - 无变更
+      - name: Send Telegram notification - No Changes
+        if: steps.updater.outputs.has_changes == 'false'
+        run: |
+          MESSAGE="ℹ️ *Skill 自动更新检查*
+
+📅 时间: $(date +'%Y-%m-%d %H:%M:%S')
+✅ 状态: 没有需要更新的 Skill
+
+所有 Skill 都是最新的！"
+
+          curl -s -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_USER_ID}" \
+            -d "text=${MESSAGE}" \
+            -d "parse_mode=Markdown"
+      
+      # 10. Telegram 通知 - 试运行模式
+      - name: Send Telegram notification - Dry Run
+        if: github.event.inputs.dry_run == 'true'
+        run: |
+          MESSAGE="🧪 *Skill 更新 - 试运行模式*
+
+📅 时间: $(date +'%Y-%m-%d %H:%M:%S')
+🔍 状态: 仅检查，未应用变更
+
+如需应用变更，请手动运行工作流并关闭试运行模式。"
+
+          curl -s -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_USER_ID}" \
+            -d "text=${MESSAGE}" \
+            -d "parse_mode=Markdown"
+
+  # 失败通知任务
+  notify-on-failure:
+    runs-on: ubuntu-latest
+    needs: update-skills
+    if: failure()
+    
+    steps:
+      - name: Send Telegram notification - Failure
+        run: |
+          MESSAGE="❌ *Skill 自动更新失败*
+
+📅 时间: $(date +'%Y-%m-%d %H:%M:%S')
+🔴 状态: 工作流执行失败
+
+请检查工作流日志：
+${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          curl -s -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_USER_ID}" \
+            -d "text=${MESSAGE}" \
+            -d "parse_mode=Markdown"
