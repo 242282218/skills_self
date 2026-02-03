@@ -27,6 +27,10 @@ try:
 except ImportError as e:
     SDK_AVAILABLE = False
     print(f"SDK导入失败: {e}")
+    # 创建占位类以避免 NameError
+    SDKQuarkConfig = None
+    QuarkClient = None
+    AsyncQuarkClient = None
 
 from app.core.logging import get_logger
 from app.core.config_manager import get_config
