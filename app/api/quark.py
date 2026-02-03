@@ -2,18 +2,26 @@
 夸克API路由
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from app.services.quark_service import QuarkService
 from app.services.strm_generator import generate_strm_from_quark
 from app.core.config_manager import get_config
 from app.core.logging import get_logger
-from app.core.dependencies import get_quark_cookie, get_only_video_flag, get_root_id
+from app.core.dependencies import get_quark_cookie, get_only_video_flag
+from app.core.validators import validate_identifier, validate_path, InputValidationError
+from app.core.constants import MAX_PATH_LENGTH, MAX_FILES_LIMIT
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/quark", tags=["夸克服务"])
 
 # 获取配置管理器
 config = get_config()
+
+
+def _handle_exception(e: Exception, message: str) -> HTTPException:
+    """统一异常处理"""
+    logger.error(f"{message}: {str(e)}")
+    return HTTPException(status_code=500, detail=f"{message}: {str(e)}")
 
 
 @router.get("/files/{parent}")
@@ -37,14 +45,23 @@ async def get_files(
     Returns:
         文件列表
     """
+    service = None
     try:
+        parent = validate_identifier(parent, "parent")
+        # 正确处理only_video参数：如果显式传入None，使用配置文件的值
+        # 如果显式传入true/false，使用传入的值
+        final_only_video = only_video if only_video is not None else _only_video
+        
         service = QuarkService(cookie=_cookie)
-        files = await service.get_files(parent, only_video=only_video or _only_video)
-        await service.close()
+        files = await service.get_files(parent, only_video=final_only_video)
         return {"files": files, "count": len(files)}
-    except Exception as e:
-        logger.error(f"Failed to get files: {str(e)}")
+    except InputValidationError:
         raise
+    except Exception as e:
+        raise _handle_exception(e, "Failed to get files")
+    finally:
+        if service:
+            await service.close()
 
 
 @router.get("/link/{file_id}")
@@ -65,14 +82,19 @@ async def get_download_link(
     Returns:
         下载链接信息
     """
+    service = None
     try:
+        file_id = validate_identifier(file_id, "file_id")
         service = QuarkService(cookie=_cookie)
         link = await service.get_download_link(file_id)
-        await service.close()
         return {"url": link.url, "headers": link.headers}
-    except Exception as e:
-        logger.error(f"Failed to get download link: {str(e)}")
+    except InputValidationError:
         raise
+    except Exception as e:
+        raise _handle_exception(e, "Failed to get download link")
+    finally:
+        if service:
+            await service.close()
 
 
 @router.get("/transcoding/{file_id}")
@@ -94,36 +116,37 @@ async def get_transcoding_link(file_id: str, cookie: str = None):
     if not cookie:
         raise HTTPException(status_code=400, detail="Cookie is required. Please provide cookie parameter or set it in config.yaml")
 
+    service = None
     try:
+        file_id = validate_identifier(file_id, "file_id")
         service = QuarkService(cookie=cookie)
         link = await service.get_transcoding_link(file_id)
-        await service.close()
         return {"url": link.url, "headers": link.headers, "content_length": link.content_length}
+    except InputValidationError:
+        raise
     except Exception as e:
-        logger.error(f"Failed to get transcoding link: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _handle_exception(e, "Failed to get transcoding link")
+    finally:
+        if service:
+            await service.close()
 
 
-@router.get("/link/test")
+@router.get("/test/link")
 async def test_link_endpoint():
     """
     测试直链获取端点
 
     用于集成测试
     """
-    try:
-        # 返回测试数据
-        return {
-            "url": "http://example.com/test.mp4",
-            "headers": {
-                "Cookie": "test_cookie",
-                "Referer": "https://pan.quark.cn/"
-            },
-            "test": True
-        }
-    except Exception as e:
-        logger.error(f"Failed to test link endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # 返回测试数据
+    return {
+        "url": "http://example.com/test.mp4",
+        "headers": {
+            "Cookie": "test_cookie",
+            "Referer": "https://pan.quark.cn/"
+        },
+        "test": True
+    }
 
 
 @router.get("/config")
@@ -143,17 +166,19 @@ async def get_quark_config():
             "cookie_configured": bool(quark_config.get("cookie", ""))
         }
         return safe_config
+    except InputValidationError:
+        raise
     except Exception as e:
-        logger.error(f"Failed to get quark config: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _handle_exception(e, "Failed to get quark config")
 
 
 @router.post("/sync")
 async def sync_quark_files(
     cookie: str = None,
     root_id: str = None,
-    output_dir: str = "./strm",
-    only_video: bool = None
+    output_dir: str = Query("./strm", min_length=1, max_length=MAX_PATH_LENGTH),
+    only_video: bool = None,
+    max_files: int = Query(50, ge=1, le=MAX_FILES_LIMIT)
 ):
     """
     同步夸克文件到STRM
@@ -165,6 +190,7 @@ async def sync_quark_files(
         root_id: 根目录ID（可选，默认从配置文件读取）
         output_dir: STRM文件输出目录（可选，默认./strm）
         only_video: 是否只处理视频文件（可选，默认从配置文件读取）
+        max_files: 最大处理文件数量（可选，默认50）
 
     Returns:
         同步结果
@@ -177,21 +203,27 @@ async def sync_quark_files(
     if not cookie:
         raise HTTPException(status_code=400, detail="Cookie is required. Please provide cookie parameter or set it in config.yaml")
 
+    output_dir = validate_path(output_dir, "output_dir")
+    root_id = validate_identifier(root_id, "root_id")
+
     try:
         # 调用STRM生成器
         result = await generate_strm_from_quark(
             cookie=cookie,
             output_dir=output_dir,
             root_id=root_id,
-            only_video=only_video
+            only_video=only_video,
+            max_files=max_files
         )
 
         return {
             "message": "Sync completed",
             "root_id": root_id,
             "output_dir": output_dir,
+            "max_files": max_files,
             "result": result
         }
+    except InputValidationError:
+        raise
     except Exception as e:
-        logger.error(f"Failed to sync quark files: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _handle_exception(e, "Failed to sync quark files")

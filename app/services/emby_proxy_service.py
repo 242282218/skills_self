@@ -133,14 +133,15 @@ class EmbyProxyService:
         1. 检查是否是STRM文件
         2. 如果是STRM，解析文件ID
         3. 获取夸克直链
-        4. 返回302重定向URL
+        4. 验证直链有效性
+        5. 返回302重定向URL或降级到本地代理
 
         Args:
             media_source_id: 媒体源ID
             file_path: 文件路径（可选）
 
         Returns:
-            302重定向URL
+            直链URL（用于302重定向）
         """
         try:
             # 如果提供了文件路径，直接使用
@@ -148,9 +149,7 @@ class EmbyProxyService:
                 # 从STRM文件解析文件ID
                 file_id = self._extract_file_id_from_strm(file_path)
                 if file_id:
-                    link = await self.quark_service.get_download_link(file_id)
-                    logger.info(f"Stream redirected to quark link: {link.url[:100]}...")
-                    return link.url
+                    return await self._get_stream_url_with_fallback(file_id)
 
             # 如果没有文件路径或无法解析，尝试通过Emby API获取
             if self.emby_client:
@@ -163,6 +162,59 @@ class EmbyProxyService:
         except Exception as e:
             logger.error(f"Failed to proxy stream request: {str(e)}")
             raise
+
+    async def _get_stream_url_with_fallback(self, file_id: str) -> str:
+        """
+        获取流URL，带Failover机制
+
+        1. 尝试获取直链
+        2. 验证直链有效性
+        3. 如果直链无效，降级到本地代理
+
+        Args:
+            file_id: 文件ID
+
+        Returns:
+            流URL
+        """
+        try:
+            # 1. 尝试获取直链
+            link = await self.quark_service.get_download_link(file_id)
+            direct_url = link.url
+
+            # 2. 验证直链有效性 (HEAD请求)
+            if await self._check_url_alive(direct_url):
+                logger.info(f"Direct link is valid: {direct_url[:100]}...")
+                return direct_url
+            else:
+                logger.warning(f"Direct link is invalid, falling back to local proxy")
+                # 3. 降级策略: 返回本地代理URL
+                return f"{self.proxy_base_url}/api/proxy/stream/{file_id}"
+
+        except Exception as e:
+            logger.warning(f"Failed to get direct link, falling back to local proxy: {e}")
+            # 降级到本地代理
+            return f"{self.proxy_base_url}/api/proxy/stream/{file_id}"
+
+    async def _check_url_alive(self, url: str, timeout: int = 5) -> bool:
+        """
+        检查URL是否有效
+
+        Args:
+            url: 要检查的URL
+            timeout: 超时时间（秒）
+
+        Returns:
+            bool: URL是否有效
+        """
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+                async with session.head(url, allow_redirects=True) as resp:
+                    # 检查状态码是否为2xx或3xx
+                    return 200 <= resp.status < 400
+        except Exception as e:
+            logger.debug(f"URL check failed for {url[:50]}...: {e}")
+            return False
 
     def _extract_file_id_from_strm(self, file_path: str) -> Optional[str]:
         """

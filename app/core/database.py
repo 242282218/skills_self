@@ -251,3 +251,11 @@ class Database:
         except Exception as e:
             logger.error(f"Failed to delete STRMs by remote dir {remote_dir}: {str(e)}")
             return 0
+
+    def close(self):
+        """
+        关闭数据库连接
+
+        由于使用上下文管理器，此方法主要用于兼容性
+        """
+        logger.debug(f"Database connection closed: {self.db_path}")

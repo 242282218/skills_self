@@ -10,13 +10,16 @@ from fastapi.responses import RedirectResponse
 from app.services.proxy_service import ProxyService
 from app.services.quark_service import QuarkService
 from app.core.config_manager import get_config
+from app.services.config_service import get_config_service
 from app.core.logging import get_logger
+from app.core.validators import validate_identifier, validate_proxy_path, validate_http_url, InputValidationError
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/proxy", tags=["代理服务"])
 
 # 获取配置管理器
 config = get_config()
+config_service = get_config_service()
 
 
 @router.get("/stream/test")
@@ -70,6 +73,7 @@ async def proxy_stream(
         raise HTTPException(status_code=400, detail="Cookie not configured")
 
     try:
+        file_id = validate_identifier(file_id, "file_id")
         if redirect:
             # 302重定向模式
             async with ProxyService(cookie=cookie) as service:
@@ -86,6 +90,8 @@ async def proxy_stream(
                     headers=headers,
                     media_type=headers.get("Content-Type", "video/mp4")
                 )
+    except InputValidationError:
+        raise
     except Exception as e:
         logger.error(f"Failed to proxy stream: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -108,10 +114,13 @@ async def redirect_302(file_id: str):
         raise HTTPException(status_code=400, detail="Cookie not configured")
 
     try:
+        file_id = validate_identifier(file_id, "file_id")
         async with ProxyService(cookie=cookie) as service:
             redirect_url = await service.redirect_302(file_id)
             logger.info(f"302 redirect to: {redirect_url[:100]}...")
             return RedirectResponse(url=redirect_url, status_code=302)
+    except InputValidationError:
+        raise
     except Exception as e:
         logger.error(f"Failed to get redirect URL: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -136,12 +145,15 @@ async def get_transcoding_link(file_id: str):
         raise HTTPException(status_code=400, detail="Cookie not configured")
 
     try:
+        file_id = validate_identifier(file_id, "file_id")
         service = QuarkService(cookie=cookie)
         link = await service.get_transcoding_link(file_id)
         await service.close()
 
         logger.info(f"302 redirect to transcoding link: {link.url[:100]}...")
         return RedirectResponse(url=link.url, status_code=302)
+    except InputValidationError:
+        raise
     except Exception as e:
         logger.error(f"Failed to get transcoding link: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -162,8 +174,12 @@ async def proxy_emby_request(request: Request, path: str):
         Emby响应
     """
     try:
+        path = validate_proxy_path(path, "path")
         # 从配置获取Emby服务器地址
-        emby_url = config.get("endpoints.0.emby_url", "http://localhost:8096")
+        app_config = config_service.get_config()
+        emby_url = app_config.endpoints[0].emby_url if app_config.endpoints else "http://localhost:8096"
+        if emby_url:
+            validate_http_url(emby_url, "emby_url")
 
         # 构建目标URL
         target_url = f"{emby_url}/{path}"
@@ -181,6 +197,8 @@ async def proxy_emby_request(request: Request, path: str):
             "target_url": target_url,
             "path": path
         }
+    except InputValidationError:
+        raise
     except Exception as e:
         logger.error(f"Failed to proxy Emby request: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -200,6 +218,8 @@ async def clear_cache():
         async with ProxyService(cookie=cookie) as service:
             await service.clear_cache()
             return {"status": "ok", "message": "Cache cleared"}
+    except InputValidationError:
+        raise
     except Exception as e:
         logger.error(f"Failed to clear cache: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -219,6 +239,8 @@ async def get_cache_stats():
         async with ProxyService(cookie=cookie) as service:
             stats = await service.get_cache_stats()
             return {"status": "ok", "stats": stats}
+    except InputValidationError:
+        raise
     except Exception as e:
         logger.error(f"Failed to get cache stats: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

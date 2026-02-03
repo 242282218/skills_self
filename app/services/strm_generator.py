@@ -50,7 +50,8 @@ class STRMGenerator:
         self,
         root_id: str = "0",
         remote_path: str = "",
-        only_video: bool = True
+        only_video: bool = True,
+        max_files: int = 50
     ) -> Dict[str, Any]:
         """
         生成STRM文件
@@ -59,6 +60,7 @@ class STRMGenerator:
             root_id: 根目录ID
             remote_path: 远程路径前缀
             only_video: 是否只处理视频文件
+            max_files: 最大处理文件数量
 
         Returns:
             生成结果统计
@@ -77,6 +79,11 @@ class STRMGenerator:
             stats["total_files"] = len(all_files)
 
             logger.info(f"Found {len(all_files)} files to process")
+
+            # 限制处理文件数量
+            if max_files > 0 and len(all_files) > max_files:
+                logger.info(f"Limiting processing to {max_files} files out of {len(all_files)} total")
+                all_files = all_files[:max_files]
 
             # 生成STRM文件
             for file_info in all_files:
@@ -213,7 +220,8 @@ async def generate_strm_from_quark(
     cookie: str = None,
     output_dir: str = "./strm",
     root_id: str = None,
-    only_video: bool = None
+    only_video: bool = None,
+    max_files: int = 50
 ) -> Dict[str, Any]:
     """
     从夸克网盘生成STRM文件的便捷函数
@@ -223,6 +231,7 @@ async def generate_strm_from_quark(
         output_dir: 输出目录
         root_id: 根目录ID（可选，默认从配置文件读取）
         only_video: 是否只处理视频文件（可选，默认从配置文件读取）
+        max_files: 最大处理文件数量（可选，默认50）
 
     Returns:
         生成结果
@@ -246,7 +255,8 @@ async def generate_strm_from_quark(
     try:
         result = await generator.generate_strm_files(
             root_id=root_id,
-            only_video=only_video
+            only_video=only_video,
+            max_files=max_files
         )
         return result
     finally:

@@ -14,37 +14,59 @@ SDK_PATH = Path(r"C:\Users\24228\Desktop\smart_media\quark_api_package")
 if str(SDK_PATH) not in sys.path:
     sys.path.insert(0, str(SDK_PATH))
 
-# SDK导入
-try:
-    from packages.quark_sdk import QuarkClient, AsyncQuarkClient
-    from packages.quark_sdk.core.config import QuarkConfig as SDKQuarkConfig
-    from packages.search.core.service import SearchService
-    from packages.search.sources.manager import SourceManager
-    from packages.search.scoring.engine import ScoringEngine
-    from packages.search.cache.manager import CacheManager
-    from packages.rename import RenameEngine
-    SDK_AVAILABLE = True
-except ImportError as e:
-    SDK_AVAILABLE = False
-    print(f"SDK导入失败: {e}")
-    # 创建占位类以避免 NameError
-    SDKQuarkConfig = None
-    QuarkClient = None
-    AsyncQuarkClient = None
-
+# 先导入logger
 from app.core.logging import get_logger
-from app.core.config_manager import get_config
+from app.services.config_service import get_config_service
 
 logger = get_logger(__name__)
 
+# SDK导入
+SDK_AVAILABLE = False
+QuarkClient = None
+AsyncQuarkClient = None
+SDKQuarkConfig = None
+RenameEngine = None
+
+try:
+    from packages.quark_sdk import QuarkClient, AsyncQuarkClient
+    from packages.quark_sdk.core.config import QuarkConfig as SDKQuarkConfig
+    SDK_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Quark SDK导入失败: {e}")
+
+try:
+    from packages.rename import RenameEngine
+except ImportError as e:
+    logger.warning(f"RenameEngine导入失败: {e}")
+    RenameEngine = None
+
+if not SDK_AVAILABLE:
+    logger.warning("SDK不可用，部分功能将受限")
+
 
 def get_api_keys():
-    """从配置文件获取API密钥"""
+    """
+    从配置文件获取API密钥
+
+    Args:
+        无
+
+    Returns:
+        dict: 包含 ai_api_key 和 tmdb_api_key 的字典
+
+    Side Effects:
+        从 ConfigService 读取配置
+    """
     try:
-        config = get_config()
-        # 从ConfigManager获取API密钥
-        ai_api_key = config.get('api_keys.ai_api_key')
-        tmdb_api_key = config.get('api_keys.tmdb_api_key')
+        config_service = get_config_service()
+        config = config_service.get_config()
+        # 从ConfigService获取API密钥
+        ai_api_key = (
+            config.zhipu.api_key if getattr(config, "zhipu", None) else None
+        ) or (config.api_keys.ai_api_key if config.api_keys else None)
+        tmdb_api_key = (
+            config.tmdb.api_key if getattr(config, "tmdb", None) else None
+        ) or (config.api_keys.tmdb_api_key if config.api_keys else None)
         return {
             'ai_api_key': ai_api_key,
             'tmdb_api_key': tmdb_api_key
@@ -109,37 +131,28 @@ class SDKConfig:
         )
 
     def create_search_service(self) -> Optional[Any]:
-        """创建搜索服务"""
-        if not SDK_AVAILABLE:
-            return None
-        try:
-            from packages.search.config.settings import SearchConfig
-            config = SearchConfig(
-                cache_db_path="data/search_cache.db"
-            )
-            
-            # 默认只启用夸克API搜索源，避免网络搜索返回无效结果
-            source_manager = SourceManager({
-                "telegram": {"enabled": False},
-                "quark_api": {"enabled": True},
-                "net_search": {"enabled": False}  # 默认禁用网络搜索
-            })
-            
-            scoring_engine = ScoringEngine()
-            cache_manager = CacheManager(db_path=config.cache_db_path)
-            return SearchService(
-                source_manager=source_manager,
-                scoring_engine=scoring_engine,
-                cache_manager=cache_manager
-            )
-        except Exception as e:
-            logger.error(f"创建搜索服务失败: {e}")
-            return None
+        """
+        创建搜索服务
+
+        注意：原搜索服务已弃用，功能由 pansou HTTP API 服务替代
+        参考: quark_strm/app/services/search_service.py
+
+        Returns:
+            None: 搜索服务已通过 pansou 服务实现
+        """
+        logger.info("搜索服务已通过 pansou HTTP API 实现，无需创建本地服务")
+        return None
 
     def create_rename_engine(self) -> Optional[Any]:
         """创建重命名引擎"""
         if not SDK_AVAILABLE:
+            logger.warning("SDK不可用，无法创建重命名引擎")
             return None
+
+        if RenameEngine is None:
+            logger.warning("RenameEngine未导入")
+            return None
+
         try:
             return RenameEngine(
                 tmdb_api_key=self.tmdb_api_key,

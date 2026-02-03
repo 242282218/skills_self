@@ -1,243 +1,90 @@
-"""
-定时任务API路由
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, WebSocket, WebSocketDisconnect
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from app.core.db import get_db
+from app.schemas.task import TaskCreate, TaskResponse
+from app.services.task_queue_service import TaskService
+from app.services.task_runner import TaskRunner
+from app.core.websocket_manager import ws_manager
 
-参考: alist-strm task_scheduler.py
-"""
+router = APIRouter()
 
-from fastapi import APIRouter, HTTPException
-from app.services.task_scheduler import TaskScheduler, TaskMode
-from app.core.logging import get_logger
-from typing import Optional
+def get_service(db: Session = Depends(get_db)):
+    return TaskService(db)
 
-logger = get_logger(__name__)
-router = APIRouter(prefix="/api/tasks", tags=["定时任务"])
-
-
-# 全局调度器实例
-_scheduler: Optional[TaskScheduler] = None
-
-
-def get_scheduler() -> TaskScheduler:
-    """获取调度器实例"""
-    global _scheduler
-    if _scheduler is None:
-        _scheduler = TaskScheduler()
-    return _scheduler
-
-
-@router.get("/")
-async def list_tasks():
-    """
-    列出所有任务
-
-    Returns:
-        任务列表
-    """
+@router.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await ws_manager.connect(websocket)
     try:
-        scheduler = get_scheduler()
-        return scheduler.get_status()
-    except Exception as e:
-        logger.error(f"Failed to list tasks: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        while True:
+            # 保持连接，接收客户端消息（如果有的话）
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
 
-
-@router.post("/")
-async def create_task(
-    name: str,
-    mode: str,
-    interval_type: str,
-    interval_value: int,
-    config_id: str,
-    enabled: bool = True
+@router.post("/", response_model=TaskResponse)
+def create_task(
+    task: TaskCreate, 
+    background_tasks: BackgroundTasks,
+    service: TaskService = Depends(get_service)
 ):
-    """
-    创建任务
+    """创建新任务并触发后台执行"""
+    new_task = service.create_task(task)
+    
+    # 将任务提交到后台运行
+    background_tasks.add_task(TaskRunner.run_task, new_task.id)
+    
+    return new_task
 
-    Args:
-        name: 任务名称
-        mode: 任务模式（strm_creation/strm_validation_quick/strm_validation_slow）
-        interval_type: 间隔类型（minute/hourly/daily/weekly/monthly）
-        interval_value: 间隔值
-        config_id: 配置ID
-        enabled: 是否启用
-
-    Returns:
-        创建的任务
-    """
-    try:
-        # 验证任务模式
-        try:
-            task_mode = TaskMode(mode)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid task mode: {mode}")
-
-        # 验证间隔类型
-        valid_interval_types = ["minute", "hourly", "daily", "weekly", "monthly"]
-        if interval_type not in valid_interval_types:
-            raise HTTPException(status_code=400, detail=f"Invalid interval type: {interval_type}")
-
-        # 验证间隔值
-        if interval_value <= 0:
-            raise HTTPException(status_code=400, detail="Interval value must be positive")
-
-        scheduler = get_scheduler()
-        task = scheduler.add_task(
-            name=name,
-            mode=task_mode,
-            interval_type=interval_type,
-            interval_value=interval_value,
-            config_id=config_id,
-            enabled=enabled
-        )
-
-        return task.to_dict()
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to create task: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.put("/{task_id}")
-async def update_task(
-    task_id: str,
-    name: Optional[str] = None,
-    interval_type: Optional[str] = None,
-    interval_value: Optional[int] = None,
-    enabled: Optional[bool] = None
+@router.get("/", response_model=List[TaskResponse])
+def list_tasks(
+    status: Optional[str] = None,
+    skip: int = 0, 
+    limit: int = 20, 
+    service: TaskService = Depends(get_service)
 ):
-    """
-    更新任务
+    """获取任务列表"""
+    return service.get_tasks(skip, limit, status)
 
-    Args:
-        task_id: 任务ID
-        name: 任务名称
-        interval_type: 间隔类型
-        interval_value: 间隔值
-        enabled: 是否启用
+@router.get("/{task_id}", response_model=TaskResponse)
+def get_task(
+    task_id: int, 
+    service: TaskService = Depends(get_service)
+):
+    task = service.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
 
-    Returns:
-        更新结果
-    """
-    try:
-        # 验证间隔类型
-        if interval_type is not None:
-            valid_interval_types = ["minute", "hourly", "daily", "weekly", "monthly"]
-            if interval_type not in valid_interval_types:
-                raise HTTPException(status_code=400, detail=f"Invalid interval type: {interval_type}")
-
-        # 验证间隔值
-        if interval_value is not None and interval_value <= 0:
-            raise HTTPException(status_code=400, detail="Interval value must be positive")
-
-        scheduler = get_scheduler()
-        success = scheduler.update_task(
-            task_id=task_id,
-            name=name,
-            interval_type=interval_type,
-            interval_value=interval_value,
-            enabled=enabled
-        )
-
-        if not success:
-            raise HTTPException(status_code=404, detail="Task not found")
-
-        task = scheduler.get_task(task_id)
-        return task.to_dict()
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to update task: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+@router.post("/{task_id}/cancel")
+def cancel_task(
+    task_id: int, 
+    service: TaskService = Depends(get_service)
+):
+    """取消任务"""
+    success = service.cancel_task(task_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Cannot cancel task")
+    return {"status": "success"}
 
 @router.delete("/{task_id}")
-async def delete_task(task_id: str):
-    """
-    删除任务
+def delete_task(
+    task_id: int, 
+    service: TaskService = Depends(get_service)
+):
+    """删除任务记录"""
+    success = service.delete_task(task_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"status": "success"}
 
-    Args:
-        task_id: 任务ID
-
-    Returns:
-        删除结果
-    """
-    try:
-        scheduler = get_scheduler()
-        success = scheduler.delete_task(task_id)
-
-        if not success:
-            raise HTTPException(status_code=404, detail="Task not found")
-
-        return {"status": "ok", "message": "Task deleted"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to delete task: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/{task_id}/run")
-async def run_task_immediately(task_id: str):
-    """
-    立即运行任务
-
-    Args:
-        task_id: 任务ID
-
-    Returns:
-        运行结果
-    """
-    try:
-        scheduler = get_scheduler()
-        success = await scheduler.run_task_immediately(task_id)
-
-        if not success:
-            raise HTTPException(status_code=404, detail="Task not found or handler not registered")
-
-        return {"status": "ok", "message": "Task started"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to run task: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/start")
-async def start_scheduler():
-    """
-    启动调度器
-
-    Returns:
-        启动结果
-    """
-    try:
-        scheduler = get_scheduler()
-        await scheduler.start()
-        return {"status": "ok", "message": "Scheduler started"}
-
-    except Exception as e:
-        logger.error(f"Failed to start scheduler: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/stop")
-async def stop_scheduler():
-    """
-    停止调度器
-
-    Returns:
-        停止结果
-    """
-    try:
-        scheduler = get_scheduler()
-        await scheduler.stop()
-        return {"status": "ok", "message": "Scheduler stopped"}
-
-    except Exception as e:
-        logger.error(f"Failed to stop scheduler: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+@router.get("/{task_id}/logs")
+def get_task_logs(
+    task_id: int, 
+    service: TaskService = Depends(get_service)
+):
+    """获取任务日志"""
+    task = service.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task.logs or []

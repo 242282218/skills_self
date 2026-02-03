@@ -4,10 +4,11 @@
 用于读取和管理YAML配置文件
 """
 
-import yaml
 import os
+import threading
 from typing import Dict, Any, Optional
 from app.core.logging import get_logger
+from app.config.settings import AppConfig
 
 logger = get_logger(__name__)
 
@@ -17,27 +18,38 @@ class ConfigManager:
 
     _instance = None
     _config = None
+    _lock = threading.Lock()
 
     def __new__(cls, config_path: str = "config.yaml"):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance.config_path = config_path
-            cls._instance.load_config()
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance.config_path = config_path
+                    cls._instance.load_config()
+                    try:
+                        from app.services.config_service import get_config_service
+                        get_config_service(config_path).register_change_callback(
+                            cls._instance.reload
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to register config callback: {e}")
         return cls._instance
 
     def load_config(self):
         """加载配置文件"""
         try:
             if os.path.exists(self.config_path):
-                with open(self.config_path, 'r', encoding='utf-8') as f:
-                    self._config = yaml.safe_load(f)
+                app_config = AppConfig.from_yaml(self.config_path)
+                self._config = app_config.model_dump()
                 logger.info(f"Configuration loaded from {self.config_path}")
             else:
                 logger.warning(f"Configuration file not found: {self.config_path}")
                 self._config = {}
         except Exception as e:
             logger.error(f"Failed to load configuration: {str(e)}")
-            self._config = {}
+            if self._config is None:
+                self._config = {}
 
     def get(self, key: str, default: Any = None) -> Any:
         """

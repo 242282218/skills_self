@@ -8,6 +8,7 @@ from loguru import logger
 import sys
 import os
 from typing import Optional
+from app.core.security import redact_sensitive
 
 
 def setup_logging(
@@ -27,6 +28,13 @@ def setup_logging(
     """
     logger.remove()
 
+    def _patcher(record):
+        record["message"] = redact_sensitive(str(record["message"]))
+        if record.get("extra"):
+            for key, value in record["extra"].items():
+                if isinstance(value, str):
+                    record["extra"][key] = redact_sensitive(value)
+
     console_format = (
         "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
         "<level>{level: <8}</level> | "
@@ -40,6 +48,8 @@ def setup_logging(
         "{name}:{function}:{line} - "
         "{message}"
     )
+
+    logger.configure(patcher=_patcher)
 
     logger.add(
         sys.stdout,

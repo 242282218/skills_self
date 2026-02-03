@@ -4,7 +4,9 @@
 参考: MediaHelp proxy.py
 """
 
+import asyncio
 import aiohttp
+
 from typing import Optional, Tuple
 from app.services.quark_service import QuarkService
 from app.services.link_cache import LinkCache
@@ -29,6 +31,7 @@ class ProxyService:
             cookie: 夸克Cookie
             cache_ttl: 缓存TTL（秒）
             max_cache_size: 最大缓存条目数
+            concurrency_limit: 并发限制
         """
         self.cookie = cookie
         self.quark_service = QuarkService(cookie)
@@ -36,6 +39,7 @@ class ProxyService:
             default_ttl=cache_ttl,
             max_size=max_cache_size
         )
+        self.semaphore = asyncio.Semaphore(50) # 默认限制50并发
         logger.info("ProxyService initialized")
 
     async def __aenter__(self):
@@ -78,7 +82,8 @@ class ProxyService:
                 return cached_entry.value, cached_entry.headers
 
             # 获取直链
-            link = await self.quark_service.get_download_link(file_id)
+            async with self.semaphore:
+                link = await self.quark_service.get_download_link(file_id)
 
             # 创建aiohttp客户端
             async with aiohttp.ClientSession() as session:
@@ -145,7 +150,8 @@ class ProxyService:
                 logger.debug(f"Cache hit for redirect {file_id}")
                 return cached_entry.value
 
-            link = await self.quark_service.get_download_link(file_id)
+            async with self.semaphore:
+                link = await self.quark_service.get_download_link(file_id)
 
             # 缓存直链
             await self.link_cache.set(

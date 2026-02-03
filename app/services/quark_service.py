@@ -123,6 +123,48 @@ class QuarkService:
             part_size=10 * 1024 * 1024  # 10MB
         )
 
+    async def get_file_by_path(self, path: str) -> FileModel:
+        """
+        根据路径获取文件信息
+        
+        Args:
+            path: 文件路径 (e.g. "Movies/Inception/Inception.mp4")
+            
+        Returns:
+            FileModel: 文件信息，如果未找到返回None
+        """
+        parts = [p for p in path.split("/") if p]
+        current_fid = "0"
+        current_file = None
+        
+        if not parts:
+            # 根目录
+            return FileModel(
+                fid="0", 
+                file_name="/", 
+                is_dir=True, 
+                size=0, 
+                category=0,
+                created_at=0,
+                updated_at=0
+            )
+
+        for part in parts:
+            found = False
+            files = await self.get_files(parent=current_fid)
+            
+            for file in files:
+                if file.file_name == part:
+                    current_fid = file.fid
+                    current_file = file
+                    found = True
+                    break
+            
+            if not found:
+                return None
+                
+        return current_file
+
     async def get_transcoding_link(self, file_id: str) -> LinkModel:
         """
         获取转码直链

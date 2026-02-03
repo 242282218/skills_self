@@ -6,17 +6,24 @@ Emby API路由
 """
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import RedirectResponse
 from app.services.emby_proxy_service import EmbyProxyService
 from app.services.proxy_service import ProxyService
 from app.core.config_manager import get_config
+from app.services.config_service import get_config_service
 from app.core.logging import get_logger
+from app.services.emby_service import get_emby_service
+from fastapi import BackgroundTasks
+from pydantic import BaseModel, ConfigDict
+from typing import Optional, Dict, Any
+from app.core.validators import validate_identifier, validate_proxy_path, validate_http_url, InputValidationError
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/emby", tags=["Emby服务"])
 
 # 获取配置管理器
 config = get_config()
+config_service = get_config_service()
 
 
 @router.get("/items/{item_id}/PlaybackInfo")
@@ -46,6 +53,11 @@ async def get_playback_info(
         Hook后的PlaybackInfo响应
     """
     try:
+        item_id = validate_identifier(item_id, "item_id")
+        if user_id:
+            user_id = validate_identifier(user_id, "user_id")
+        if media_source_id:
+            media_source_id = validate_identifier(media_source_id, "media_source_id")
         # 从请求头获取API Key
         api_key = request.headers.get("X-Emby-Token")
         if not api_key:
@@ -55,16 +67,19 @@ async def get_playback_info(
             raise HTTPException(status_code=401, detail="Missing API key")
 
         # 获取Emby服务器地址
+        app_config = config_service.get_config()
         emby_base_url = request.headers.get(
             "X-Emby-Server-Url",
-            config.get("endpoints.0.emby_url", "http://localhost:8096")
+            app_config.endpoints[0].emby_url if app_config.endpoints else "http://localhost:8096"
         )
+        validate_http_url(emby_base_url, "emby_base_url")
 
         # 获取代理服务基础URL
         proxy_base_url = request.headers.get(
             "X-Proxy-Server-Url",
             f"http://{request.headers.get('host', 'localhost:8000')}"
         )
+        validate_http_url(proxy_base_url, "proxy_base_url")
 
         # 获取Cookie
         cookie = config.get_quark_cookie()
@@ -87,6 +102,8 @@ async def get_playback_info(
             return playback_info
 
     except HTTPException:
+        raise
+    except InputValidationError:
         raise
     except Exception as e:
         logger.error(f"Failed to get playback info: {str(e)}")
@@ -113,6 +130,9 @@ async def get_item(
         项目信息
     """
     try:
+        item_id = validate_identifier(item_id, "item_id")
+        if user_id:
+            user_id = validate_identifier(user_id, "user_id")
         # 从请求头获取API Key
         api_key = request.headers.get("X-Emby-Token")
         if not api_key:
@@ -122,10 +142,12 @@ async def get_item(
             raise HTTPException(status_code=401, detail="Missing API key")
 
         # 获取Emby服务器地址
+        app_config = config_service.get_config()
         emby_base_url = request.headers.get(
             "X-Emby-Server-Url",
-            config.get("endpoints.0.emby_url", "http://localhost:8096")
+            app_config.endpoints[0].emby_url if app_config.endpoints else "http://localhost:8096"
         )
+        validate_http_url(emby_base_url, "emby_base_url")
 
         # 获取Cookie
         cookie = config.get_quark_cookie()
@@ -147,6 +169,8 @@ async def get_item(
 
     except HTTPException:
         raise
+    except InputValidationError:
+        raise
     except Exception as e:
         logger.error(f"Failed to get item info: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -161,7 +185,7 @@ async def stream_video(
     filename: str = None
 ):
     """
-    视频流端点（302重定向）
+    视频流端点（307重定向）
 
     参考: go-emby2openlist internal/service/emby/redirect.go
 
@@ -169,7 +193,7 @@ async def stream_video(
     1. 接收Emby的视频流请求
     2. 解析STRM文件获取文件ID
     3. 获取夸克直链
-    4. 302重定向到直链
+    4. 307重定向到直链（推荐用于外网/公网环境）
 
     Args:
         item_id: 项目ID
@@ -179,9 +203,12 @@ async def stream_video(
         filename: 文件名
 
     Returns:
-        302重定向响应
+        307重定向响应
     """
     try:
+        item_id = validate_identifier(item_id, "item_id")
+        if media_source_id:
+            media_source_id = validate_identifier(media_source_id, "media_source_id")
         # 获取Cookie
         cookie = config.get_quark_cookie()
         if not cookie:
@@ -194,13 +221,15 @@ async def stream_video(
         if not file_id:
             raise HTTPException(status_code=400, detail="Missing media_source_id")
 
-        # 获取直链并302重定向
+        # 获取直链并307重定向
         async with ProxyService(cookie=cookie) as service:
             redirect_url = await service.redirect_302(file_id)
-            logger.info(f"302 redirect for item {item_id} to: {redirect_url[:100]}...")
-            return RedirectResponse(url=redirect_url, status_code=302)
+            logger.info(f"307 redirect for item {item_id} to: {redirect_url[:100]}...")
+            return RedirectResponse(url=redirect_url, status_code=307)
 
     except HTTPException:
+        raise
+    except InputValidationError:
         raise
     except Exception as e:
         logger.error(f"Failed to stream video: {str(e)}")
@@ -227,6 +256,9 @@ async def get_master_playlist(
         M3U8播放列表
     """
     try:
+        item_id = validate_identifier(item_id, "item_id")
+        if media_source_id:
+            media_source_id = validate_identifier(media_source_id, "media_source_id")
         # 获取Cookie
         cookie = config.get_quark_cookie()
         if not cookie:
@@ -257,6 +289,8 @@ async def get_master_playlist(
 
     except HTTPException:
         raise
+    except InputValidationError:
+        raise
     except Exception as e:
         logger.error(f"Failed to get master playlist: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -277,11 +311,14 @@ async def proxy_emby_request(request: Request, path: str):
         Emby响应
     """
     try:
+        path = validate_proxy_path(path, "path")
         # 获取Emby服务器地址
+        app_config = config_service.get_config()
         emby_base_url = request.headers.get(
             "X-Emby-Server-Url",
-            config.get("endpoints.0.emby_url", "http://localhost:8096")
+            app_config.endpoints[0].emby_url if app_config.endpoints else "http://localhost:8096"
         )
+        validate_http_url(emby_base_url, "emby_base_url")
 
         # 构建目标URL
         target_url = f"{emby_base_url}/{path}"
@@ -301,6 +338,42 @@ async def proxy_emby_request(request: Request, path: str):
             "path": path
         }
 
+    except InputValidationError:
+        raise
     except Exception as e:
         logger.error(f"Failed to proxy Emby request: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+class EmbyWebhookEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    Event: str
+    Item: Dict[str, Any]
+    Server: Optional[Dict[str, Any]] = None
+    User: Optional[Dict[str, Any]] = None
+
+@router.post("/webhook")
+async def emby_webhook(
+    event: EmbyWebhookEvent,
+    background_tasks: BackgroundTasks
+):
+    """
+    接收Emby Webhook事件
+    """
+    service = get_emby_service()
+    
+    if event.Event == "library.new":
+        background_tasks.add_task(service.handle_library_new, event.Item)
+    elif event.Event == "library.deleted":
+        background_tasks.add_task(service.handle_library_deleted, event.Item)
+        
+    return {"status": "processed", "event": event.Event}
+
+@router.post("/sync")
+async def trigger_sync(background_tasks: BackgroundTasks):
+    """
+    手动触发全量同步
+    """
+    service = get_emby_service()
+    background_tasks.add_task(service.sync_library)
+    return {"status": "started", "message": "Emby sync started in background"}

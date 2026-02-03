@@ -34,6 +34,9 @@ class ErrorResponse(BaseModel):
     code: int
     message: str
     detail: Optional[str] = None
+    error_code: Optional[str] = None
+    request_id: Optional[str] = None
+    errors: Optional[list[dict]] = None
     timestamp: int = 0
 
     def __init__(self, **kwargs):

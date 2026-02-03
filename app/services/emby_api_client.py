@@ -5,8 +5,9 @@ Emby API客户端模块
 """
 
 import aiohttp
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from app.core.logging import get_logger
+from app.core.retry import retry_on_transient, TransientError
 
 logger = get_logger(__name__)
 
@@ -52,6 +53,56 @@ class EmbyAPIClient:
             "Content-Type": "application/json"
         }
 
+    @retry_on_transient()
+    async def _request_json(self, method: str, url: str, **kwargs) -> Dict[str, Any]:
+        if not self.session:
+            raise RuntimeError("Emby client session not initialized")
+        async with self.session.request(method, url, headers=self._get_headers(), **kwargs) as response:
+            if response.status in {408, 429} or response.status >= 500:
+                raise TransientError(f"Emby API transient error: {response.status}")
+            if response.status != 200:
+                raise Exception(f"Emby API error: {response.status}")
+            return await response.json()
+
+    async def get_views(self, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """获取用户视图（媒体库）"""
+        url = f"{self.base_url}/Users/{user_id}/Views" if user_id else f"{self.base_url}/Library/MediaFolders"
+        
+        try:
+            data = await self._request_json("GET", url)
+            return data.get("Items", [])
+        except Exception as e:
+            logger.error(f"Failed to get views: {e}")
+            return []
+
+    async def get_items_by_query(
+        self,
+        user_id: Optional[str] = None,
+        parent_id: Optional[str] = None,
+        recursive: bool = True,
+        include_item_types: Optional[str] = None,
+        fields: Optional[str] = "Path,MediaSources"
+    ) -> List[Dict[str, Any]]:
+        """通用查询获取项目"""
+        endpoint = f"/Users/{user_id}/Items" if user_id else "/Items"
+        url = f"{self.base_url}{endpoint}"
+        
+        params = {
+            "Recursive": str(recursive).lower(),
+            "Fields": fields,
+        }
+        if parent_id:
+            params["ParentId"] = parent_id
+        if include_item_types:
+            params["IncludeItemTypes"] = include_item_types
+            
+        try:
+            data = await self._request_json("GET", url, params=params)
+            return data.get("Items", [])
+        except Exception as e:
+            logger.error(f"Failed to query items: {e}")
+            return []
+
     async def get_items(
         self,
         item_id: str,
@@ -75,12 +126,7 @@ class EmbyAPIClient:
             params["UserId"] = user_id
 
         try:
-            async with self.session.get(url, headers=self._get_headers(), params=params) as response:
-                if response.status == 200:
-                    return await response.json()
-                else:
-                    logger.error(f"Failed to get item {item_id}: status {response.status}")
-                    raise Exception(f"Failed to get item: {response.status}")
+            return await self._request_json("GET", url, params=params)
         except Exception as e:
             logger.error(f"Failed to get item {item_id}: {str(e)}")
             raise
@@ -117,12 +163,7 @@ class EmbyAPIClient:
         }
 
         try:
-            async with self.session.get(url, headers=self._get_headers(), params=params) as response:
-                if response.status == 200:
-                    return await response.json()
-                else:
-                    logger.error(f"Failed to get playback info for {item_id}: status {response.status}")
-                    raise Exception(f"Failed to get playback info: {response.status}")
+            return await self._request_json("GET", url, params=params)
         except Exception as e:
             logger.error(f"Failed to get playback info for {item_id}: {str(e)}")
             raise
@@ -152,12 +193,7 @@ class EmbyAPIClient:
             device_profile = self._get_default_device_profile()
 
         try:
-            async with self.session.post(url, headers=self._get_headers(), json=device_profile) as response:
-                if response.status == 200:
-                    return await response.json()
-                else:
-                    logger.error(f"Failed to post playback info for {item_id}: status {response.status}")
-                    raise Exception(f"Failed to post playback info: {response.status}")
+            return await self._request_json("POST", url, json=device_profile)
         except Exception as e:
             logger.error(f"Failed to post playback info for {item_id}: {str(e)}")
             raise

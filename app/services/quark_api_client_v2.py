@@ -8,6 +8,7 @@ import aiohttp
 import json
 from typing import Optional, Dict, Any, List
 from app.core.logging import get_logger
+from app.core.retry import retry_on_transient, TransientError
 
 logger = get_logger(__name__)
 
@@ -41,6 +42,7 @@ class QuarkAPIClient:
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession(timeout=self.timeout, connector=aiohttp.TCPConnector(limit=10))
 
+    @retry_on_transient()
     async def request(
         self,
         pathname: str,
@@ -107,6 +109,8 @@ class QuarkAPIClient:
                 code = result.get("code", 0)
                 message = result.get("message", "")
 
+                if status >= 500:
+                    raise TransientError(f"API transient error: {message} (status={status})")
                 if status >= 400 or code != 0:
                     error_msg = message or "Unknown error"
                     logger.error(f"API error: {error_msg}, status: {status}, code: {code}")
@@ -116,7 +120,7 @@ class QuarkAPIClient:
 
         except aiohttp.ClientError as e:
             logger.error(f"Request failed: {str(e)}")
-            raise Exception(f"Request failed: {str(e)}")
+            raise TransientError(f"Request failed: {str(e)}") from e
         except Exception as e:
             logger.error(f"Unexpected error: {str(e)}")
             raise
@@ -288,6 +292,68 @@ class QuarkAPIClient:
                 }
 
         raise Exception("No transcoding link found")
+
+    async def get_share_token(self, pwd_id: str, passcode: str = "") -> str:
+        """获取分享Token (stoken)"""
+        await self._ensure_session()
+        params = {"pwd_id": pwd_id}
+        if passcode:
+            params["passcode"] = passcode
+            
+        url = "https://pan.quark.cn/share/sharepage/token"
+        
+        headers = {
+            "Cookie": self.cookie,
+            "User-Agent": self.user_agent,
+            "Referer": f"https://pan.quark.cn/s/{pwd_id}"
+        }
+        
+        try:
+            async with self.session.get(url, params=params, headers=headers) as resp:
+                data = await resp.json()
+                if data.get("code") != 0:
+                    # 某些情况下不需要 stoken 也能访问？或者错误信息不同
+                    # logging
+                    logger.warning(f"Get stoken result: {data}")
+                    return ""
+                return data.get("data", {}).get("stoken", "")
+        except Exception as e:
+            logger.error(f"Failed to get share token: {e}")
+            raise
+
+    async def get_share_files(self, pwd_id: str, stoken: str, pdir_fid: str = "0") -> List[Dict[str, Any]]:
+        """获取分享文件列表"""
+        params = {
+            "pwd_id": pwd_id,
+            "stoken": stoken,
+            "pdir_fid": pdir_fid,
+            "_size": "100",  # 通常我们只转存根目录下的内容
+            "_fetch_total": "1",
+            "share_id": pwd_id # 有些接口可能需要 share_id
+        }
+        
+        # 尝试调用 /share/sort
+        # 注意：如果 pdir_fid是 "0" (分享根目录), 某些实现可能不同
+        try:
+            res = await self.request("/share/sort", params=params)
+            return res.get("data", {}).get("list", [])
+        except Exception as e:
+            logger.error(f"Failed to get share files: {e}")
+            raise
+
+    async def save_share(self, pwd_id: str, stoken: str, fid_list: List[str], target_fid: str):
+        """转存文件"""
+        data = {
+            "fid_list": fid_list,
+            "pwd_id": pwd_id,
+            "stoken": stoken,
+            "pdir_fid": target_fid # 目标文件夹ID
+        }
+        try:
+            await self.request("/share/save", method="POST", data=data)
+        except Exception as e:
+            logger.error(f"Save share failed: {e}")
+            raise
 
     async def close(self):
         """关闭session"""
