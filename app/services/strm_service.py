@@ -93,6 +93,13 @@ class StrmService:
         # 保存扫描记录
         self.database.save_record(remote_path)
 
+        # STRM生成后触发Emby刷新（不影响主流程）
+        try:
+            from app.services.emby_service import get_emby_service
+            await get_emby_service().trigger_refresh_on_event("strm_generate")
+        except Exception as e:
+            logger.warning(f"Trigger Emby refresh failed (ignored): {e}")
+
         return strms
 
     async def close(self):

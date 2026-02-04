@@ -11,6 +11,7 @@ import os
 from app.core.validators import validate_http_url
 from app.core.constants import MAX_URL_LENGTH, MIN_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS
 from app.core.encryption import get_decrypted_config_value
+from apscheduler.triggers.cron import CronTrigger
 
 
 class EndpointConfig(BaseModel):
@@ -215,12 +216,55 @@ class TmdbConfig(BaseModel):
         return v
 
 
+class EmbyRefreshConfig(BaseModel):
+    """Emby刷新配置"""
+    model_config = ConfigDict(extra="forbid")
+
+    on_strm_generate: bool = Field(True, description="STRM生成后是否触发刷新")
+    on_rename: bool = Field(True, description="重命名后是否触发刷新")
+    cron: Optional[str] = Field(None, description="Cron表达式(5或6字段)，空则不启用")
+    library_ids: List[str] = Field(default_factory=list, description="要刷新的媒体库ID列表(空则全库)")
+
+    @field_validator("cron")
+    @classmethod
+    def validate_cron(cls, v):
+        if not v:
+            return None
+        v = v.strip()
+        if not v:
+            return None
+        fields = v.split()
+        if len(fields) == 6:
+            CronTrigger(
+                second=fields[0],
+                minute=fields[1],
+                hour=fields[2],
+                day=fields[3],
+                month=fields[4],
+                day_of_week=fields[5],
+            )
+            return v
+        if len(fields) == 5:
+            CronTrigger.from_crontab(v)
+            return v
+        raise ValueError("emby.refresh.cron must have 5 or 6 fields")
+
+
 class GlobalEmbyConfig(BaseModel):
     """全局Emby配置"""
     model_config = ConfigDict(extra="forbid")
 
+    enabled: bool = Field(False, description="是否启用Emby集成")
     url: str = Field("", description="Emby Server URL", max_length=MAX_URL_LENGTH)
     api_key: str = Field("", description="Emby API Key", max_length=2048)
+    timeout: int = Field(
+        30,
+        description="Emby请求超时(秒)",
+        ge=MIN_TIMEOUT_SECONDS,
+        le=MAX_TIMEOUT_SECONDS,
+    )
+    notify_on_complete: bool = Field(True, description="刷新完成后是否发送通知")
+    refresh: EmbyRefreshConfig = Field(default_factory=EmbyRefreshConfig, description="Emby刷新配置")
 
     @field_validator('url')
     @classmethod

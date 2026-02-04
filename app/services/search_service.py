@@ -243,6 +243,16 @@ class ResourceSearchService:
             搜索结果
         """
         try:
+            if not keyword or not str(keyword).strip():
+                return {
+                    "results": [],
+                    "total": 0,
+                    "page": page,
+                    "page_size": page_size,
+                    "has_more": False,
+                    "error": "keyword cannot be empty",
+                }
+
             # 默认只搜索夸克网盘
             if cloud_types is None:
                 cloud_types = ["quark"]

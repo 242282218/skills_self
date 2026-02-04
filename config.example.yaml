@@ -1,0 +1,97 @@
+alt_exts:
+  - .srt
+  - .ass
+  - .ssa
+
+api_keys:
+  ai_api_key: ""
+  tmdb_api_key: ""
+
+colored_log: true
+create_sub_directory: false
+database: quark_strm.db
+
+# Emby 刷新集成（全局配置）
+emby:
+  enabled: false
+  url: "http://YOUR_EMBY_HOST:8096"
+  api_key: "YOUR_EMBY_API_KEY"
+  timeout: 30
+  notify_on_complete: true
+  refresh:
+    on_strm_generate: true
+    on_rename: true
+    cron: "" # 例如: */1 * * * * （每分钟）
+    library_ids: [] # 留空则全库刷新
+
+endpoints:
+  - base_url: http://localhost:8000
+    dirs:
+      - create_sub_directory: false
+        disabled: false
+        force_refresh: false
+        local_directory: ./strm
+        not_recursive: false
+        remote_directories:
+          - /video
+    insecure_tls_verify: false
+    max_connections: 5
+    username: ""
+    password: ""
+    token: ""
+    # 旧版兼容字段（建议逐步迁移到 emby.*）
+    emby_url: ""
+    emby_api_key: ""
+
+exts:
+  - .mp4
+  - .mkv
+  - .avi
+  - .mov
+  - .flv
+  - .wmv
+
+log_file: logs/quark_strm.log
+log_level: INFO
+
+quark:
+  cookie: ""
+  only_video: true
+  referer: https://pan.quark.cn/
+  root_id: "0"
+
+telegram:
+  enabled: false
+  bot_token: ""
+  chat_id: ""
+  proxy: ""
+  events:
+    - task_completed
+    - task_failed
+
+timeout: 30
+
+tmdb:
+  api_key: ""
+
+webdav:
+  enabled: true
+  mount_path: /dav
+  username: admin
+  password: password
+  read_only: true
+
+wechat:
+  enabled: false
+  provider: serverchan
+  send_key: ""
+
+zhipu:
+  api_key: ""
+
+alist:
+  enabled: false
+  url: "http://localhost:5244"
+  token: ""
+  mount_path: "/"
+

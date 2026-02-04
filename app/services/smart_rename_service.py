@@ -730,6 +730,13 @@ class SmartRenameService:
                 title="智能重命名完成",
                 content=f"成功: {success}, 失败: {failed}"
             )
+
+            # 重命名完成后触发Emby刷新（不影响主流程）
+            try:
+                from app.services.emby_service import get_emby_service
+                await get_emby_service().trigger_refresh_on_event("rename")
+            except Exception as e:
+                logger.warning(f"Trigger Emby refresh after rename failed (ignored): {e}")
             
             return {
                 "batch_id": batch_id,

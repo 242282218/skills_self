@@ -14,8 +14,8 @@ from app.services.config_service import get_config_service
 from app.core.logging import get_logger
 from app.services.emby_service import get_emby_service
 from fastapi import BackgroundTasks
-from pydantic import BaseModel, ConfigDict
-from typing import Optional, Dict, Any
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Optional, Dict, Any, List
 from app.core.validators import validate_identifier, validate_proxy_path, validate_http_url, InputValidationError
 
 logger = get_logger(__name__)
@@ -24,6 +24,44 @@ router = APIRouter(prefix="/api/emby", tags=["Emby服务"])
 # 获取配置管理器
 config = get_config()
 config_service = get_config_service()
+
+
+class EmbyConfigUpdate(BaseModel):
+    """Emby配置更新"""
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    url: str = Field("", max_length=2048)
+    api_key: str = Field("", max_length=2048)
+    timeout: int = Field(30, ge=1, le=300)
+    notify_on_complete: bool = True
+
+    on_strm_generate: bool = True
+    on_rename: bool = True
+    cron: Optional[str] = None
+    library_ids: List[str] = Field(default_factory=list)
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v):
+        v = (v or "").strip()
+        if v:
+            validate_http_url(v, "emby.url")
+        return v
+
+
+class EmbyTestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: Optional[str] = None
+    api_key: Optional[str] = None
+    timeout: Optional[int] = Field(None, ge=1, le=300)
+
+
+class EmbyRefreshRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    library_ids: Optional[List[str]] = None
 
 
 @router.get("/items/{item_id}/PlaybackInfo")
@@ -108,6 +146,128 @@ async def get_playback_info(
     except Exception as e:
         logger.error(f"Failed to get playback info: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/test-connection")
+async def test_connection(body: Optional[EmbyTestRequest] = None):
+    """
+    测试Emby连接
+
+    - 不传参：使用当前保存的配置
+    - 传入 url/api_key：用于临时测试（不写入配置）
+    """
+    service = get_emby_service()
+    kwargs = {}
+    if body:
+        if body.url:
+            kwargs["url"] = body.url
+        if body.api_key:
+            kwargs["api_key"] = body.api_key
+    return await service.test_connection(**kwargs)
+
+
+@router.get("/libraries")
+async def get_libraries():
+    """获取媒体库列表"""
+    service = get_emby_service()
+    if not service.is_enabled:
+        raise HTTPException(status_code=400, detail="Emby集成未启用")
+    libs = await service.get_libraries()
+    return {"success": True, "libraries": libs}
+
+
+@router.post("/refresh")
+async def refresh_libraries(background_tasks: BackgroundTasks, body: Optional[EmbyRefreshRequest] = None):
+    """手动触发刷新（后台执行）"""
+    service = get_emby_service()
+    if not service.is_enabled:
+        raise HTTPException(status_code=400, detail="Emby集成未启用")
+
+    library_ids = body.library_ids if body else None
+    background_tasks.add_task(service.refresh_configured_libraries, library_ids)
+    return {"success": True, "message": "刷新任务已触发"}
+
+
+@router.get("/refresh/history")
+async def refresh_history(limit: int = 20):
+    service = get_emby_service()
+    if limit < 1:
+        limit = 1
+    if limit > 100:
+        limit = 100
+    return {"success": True, "history": service.get_refresh_history(limit=limit)}
+
+
+@router.get("/status")
+async def get_status():
+    """获取Emby集成状态"""
+    service = get_emby_service()
+    app_config = config_service.get_config()
+
+    status = {
+        "enabled": bool(service.is_enabled),
+        "connected": False,
+        "server_info": None,
+        "configuration": {
+            "enabled": bool(app_config.emby.enabled),
+            "url": app_config.emby.url,
+            "api_key": ("***" + app_config.emby.api_key[-4:]) if app_config.emby.api_key else "",
+            "timeout": app_config.emby.timeout,
+            "notify_on_complete": app_config.emby.notify_on_complete,
+            "on_strm_generate": app_config.emby.refresh.on_strm_generate,
+            "on_rename": app_config.emby.refresh.on_rename,
+            "cron": app_config.emby.refresh.cron,
+            "library_ids": app_config.emby.refresh.library_ids,
+        },
+    }
+
+    if service.is_enabled:
+        conn = await service.test_connection()
+        status["connected"] = bool(conn.get("success"))
+        status["server_info"] = conn.get("server_info")
+
+    return status
+
+
+@router.post("/config")
+async def update_emby_config(body: EmbyConfigUpdate):
+    """更新Emby配置并持久化到config.yaml"""
+    service = get_emby_service()
+    app_config = config_service.get_config()
+    config_dict = app_config.model_dump()
+
+    # 允许前端不回填 api_key：留空表示保持现有配置
+    next_url = (body.url or "").strip() or (app_config.emby.url or "")
+    next_api_key = (body.api_key or "").strip() or (app_config.emby.api_key or "")
+
+    if body.enabled and (not next_url or not next_api_key):
+        raise HTTPException(status_code=400, detail="启用Emby时必须填写url和api_key")
+
+    config_dict["emby"] = {
+        "enabled": bool(body.enabled),
+        "url": next_url,
+        "api_key": next_api_key,
+        "timeout": int(body.timeout or 30),
+        "notify_on_complete": bool(body.notify_on_complete),
+        "refresh": {
+            "on_strm_generate": bool(body.on_strm_generate),
+            "on_rename": bool(body.on_rename),
+            "cron": (body.cron or "").strip() or None,
+            "library_ids": body.library_ids or [],
+        },
+    }
+
+    try:
+        config_service.update_config(config_dict)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        service.configure_cron()
+    except Exception as e:
+        logger.warning(f"Failed to configure Emby cron after config update: {e}")
+
+    return {"success": True}
 
 
 @router.get("/items/{item_id}")

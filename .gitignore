@@ -46,6 +46,8 @@ strm/
 
 # Config (with sensitive data)
 config.local.yaml
+config.yaml
+config.yaml.*
 .env
 
 # OS

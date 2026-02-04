@@ -110,6 +110,14 @@ async def lifespan(app: FastAPI):
         cron_service = get_cron_service()
         await cron_service.start()
         logger.info("Cron service started")
+
+        # 配置Emby定时刷新（如启用）
+        try:
+            from app.services.emby_service import get_emby_service
+            get_emby_service().configure_cron()
+            logger.info("Emby cron configured")
+        except Exception as e:
+            logger.warning(f"Failed to configure Emby cron: {e}")
         
         # 启动通知服务
         notification_service = get_notification_service()
@@ -222,7 +230,7 @@ async def health():
     """健康检查"""
     from datetime import datetime
     return {
-        "status": "healthy",
+        "status": "ok",
         "timestamp": datetime.now().isoformat(),
         "version": "0.1.0"
     }

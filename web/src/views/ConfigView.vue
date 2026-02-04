@@ -5,9 +5,11 @@
     </div>
 
     <div class="config-content">
+      <EmbyConfigCard />
+
       <el-form :model="config" label-width="120px" class="config-form">
-        <el-divider>夸克网盘配置</el-divider>
-        
+        <el-divider>夸克网盘配置（待完善）</el-divider>
+
         <el-form-item label="Cookie">
           <el-input
             v-model="config.cookie"
@@ -22,28 +24,8 @@
           <el-input v-model="config.rootId" placeholder="0" />
         </el-form-item>
 
-        <el-divider>Emby配置</el-divider>
-
-        <el-form-item label="Emby地址">
-          <el-input v-model="config.embyUrl" placeholder="http://localhost:8096" />
-        </el-form-item>
-
-        <el-form-item label="API密钥">
-          <el-input v-model="config.apiKey" show-password placeholder="请输入Emby API密钥" />
-        </el-form-item>
-
-        <el-divider>Telegram Bot配置 (预留)</el-divider>
-
-        <el-form-item label="Bot Token">
-          <el-input v-model="config.telegramToken" placeholder="预留配置项" disabled />
-        </el-form-item>
-
-        <el-form-item label="Chat ID">
-          <el-input v-model="config.telegramChatId" placeholder="预留配置项" disabled />
-        </el-form-item>
-
         <el-form-item>
-          <el-button type="primary" @click="saveConfig">保存配置</el-button>
+          <el-button type="primary" @click="saveConfig">保存（待实现）</el-button>
           <el-button @click="resetConfig">重置</el-button>
         </el-form-item>
       </el-form>
@@ -54,18 +36,15 @@
 <script setup lang="ts">
 import { reactive } from 'vue'
 import { ElMessage } from 'element-plus'
+import EmbyConfigCard from '@/components/EmbyConfigCard.vue'
 
 const config = reactive({
   cookie: '',
-  rootId: '0',
-  embyUrl: '',
-  apiKey: '',
-  telegramToken: '',
-  telegramChatId: ''
+  rootId: '0'
 })
 
 const saveConfig = () => {
-  ElMessage.success('配置已保存')
+  ElMessage.info('该区域配置保存功能待实现')
 }
 
 const resetConfig = () => {
