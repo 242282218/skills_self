@@ -25,7 +25,7 @@ const router = createRouter({
         {
           path: '/files',
           name: 'Files',
-          component: () => import('@/views/FileManagerView.vue'),
+          component: () => import('@/views/CloudView.vue'),
           meta: { title: '文件管理', icon: 'Folder' }
         },
         {
@@ -57,12 +57,6 @@ const router = createRouter({
           name: 'SmartRename',
           component: () => import('@/views/SmartRenameView.vue'),
           meta: { title: '智能重命名', icon: 'Magic' }
-        },
-        {
-          path: '/cloud',
-          name: 'Cloud',
-          component: () => import('@/views/CloudView.vue'),
-          meta: { title: '云盘管理', icon: 'Cloudy' }
         }
       ]
     },

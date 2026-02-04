@@ -68,6 +68,13 @@
         <el-button circle @click="refreshFiles">
           <el-icon><Refresh /></el-icon>
         </el-button>
+        
+        <!-- STRM -->
+        <el-tooltip content="生成 STRM" placement="bottom">
+          <el-button circle type="primary" plain @click="showStrmDialog">
+            <el-icon><MagicStick /></el-icon>
+          </el-button>
+        </el-tooltip>
       </div>
     </div>
 
@@ -210,6 +217,10 @@
         <el-button type="primary" @click="batchShare">
           <el-icon><Share /></el-icon>
           批量分享
+        </el-button>
+        <el-button type="primary" plain @click="batchMove">
+          <el-icon><FolderOpened /></el-icon>
+          移动到
         </el-button>
         <el-button type="success" @click="batchDownload">
           <el-icon><Download /></el-icon>
@@ -399,6 +410,48 @@
         />
       </div>
     </el-dialog>
+
+    <!-- Move Folder Selector Dialog -->
+    <FileSelectorDialog
+      v-if="moveDialogVisible"
+      v-model:visible="moveDialogVisible"
+      storage="quark"
+      @confirm="handleMoveConfirm"
+    />
+
+    <!-- STRM Generation Dialog -->
+    <el-dialog
+      v-model="strmDialogVisible"
+      title="生成 STRM"
+      width="500px"
+    >
+      <el-form :model="strmForm" label-width="120px">
+        <el-form-item label="本地保存路径">
+          <el-input v-model="strmForm.localPath" placeholder="例如: ./strm" />
+          <div class="form-tip">服务器上保存 .strm 文件的目录</div>
+        </el-form-item>
+        <el-form-item label="基础 URL">
+          <el-input v-model="strmForm.baseUrl" />
+          <div class="form-tip">代理服务器的访问地址 (用于重定向)</div>
+        </el-form-item>
+        <el-form-item label="URL 模式">
+          <el-select v-model="strmForm.strmUrlMode">
+            <el-option label="302 重定向 (推荐)" value="redirect" />
+            <el-option label="直接直链 (不稳定)" value="direct" />
+            <el-option label="流式传输 (消耗流量)" value="stream" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="递归扫描">
+          <el-switch v-model="strmForm.recursive" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="strmDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="scanning" @click="executeScan">
+          开始生成
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -422,7 +475,8 @@ import {
   VideoCamera,
   HomeFilled,
   Coin,
-  CopyDocument
+  CopyDocument,
+  MagicStick
 } from '@element-plus/icons-vue'
 import {
   getQuarkFilesSDK,
@@ -432,6 +486,9 @@ import {
   getTranscodingLinkSDK,
   type QuarkFileSDK
 } from '@/api/quarkSdk'
+import { scanDirectory } from '@/api/strm'
+import { fileManagerApi } from '@/api/file-manager'
+import FileSelectorDialog from '@/components/file-manager/FileSelectorDialog.vue'
 
 // State
 const loading = ref(false)
@@ -449,8 +506,12 @@ const transferDialogVisible = ref(false)
 const shareDialogVisible = ref(false)
 const shareResultVisible = ref(false)
 const linkDialogVisible = ref(false)
+const strmDialogVisible = ref(false)
+const moveDialogVisible = ref(false)
 const transferring = ref(false)
 const sharing = ref(false)
+const scanning = ref(false)
+const moving = ref(false)
 
 const transferForm = reactive({
   shareUrl: '',
@@ -467,6 +528,13 @@ const shareForm = reactive({
 const shareResult = reactive({
   url: '',
   password: ''
+})
+
+const strmForm = reactive({
+  localPath: './strm',
+  baseUrl: window.location.origin,
+  strmUrlMode: 'redirect' as 'redirect' | 'stream' | 'direct',
+  recursive: true
 })
 
 const currentFile = ref<QuarkFileSDK | null>(null)
@@ -668,6 +736,38 @@ const batchShare = () => {
   shareDialogVisible.value = true
 }
 
+const batchMove = () => {
+  if (selectedFiles.value.length === 0) {
+    ElMessage.warning('请先选择文件')
+    return
+  }
+  moveDialogVisible.value = true
+}
+
+const handleMoveConfirm = async (targetPath: string) => {
+  if (selectedFiles.value.length === 0) return
+  
+  moving.value = true
+  try {
+    await fileManagerApi.operation({
+      action: 'move',
+      storage: 'quark',
+      paths: selectedFiles.value,
+      target: targetPath
+    })
+    
+    ElMessage.success('移动成功')
+    selectedFiles.value = []
+    moveDialogVisible.value = false
+    await loadFiles()
+  } catch (error) {
+    console.error('移动失败:', error)
+    ElMessage.error('移动失败')
+  } finally {
+    moving.value = false
+  }
+}
+
 const batchDownload = () => {
   if (selectedFiles.value.length === 0) {
     ElMessage.warning('请先选择文件')
@@ -725,6 +825,40 @@ const executeTransfer = async () => {
     ElMessage.error('转存失败')
   } finally {
     transferring.value = false
+  }
+}
+
+const showStrmDialog = () => {
+  strmDialogVisible.value = true
+}
+
+const executeScan = async () => {
+  scanning.value = true
+  try {
+    // Construct remote path from breadcrumb
+    // NOTE: This assumes breadcrumb names exactly match the path.
+    // If user navigated via IDs, we might not have the full correct path if duplicate names exist.
+    // But scan API takes a path string.
+    // Let's approximation: / + join breadcrumb names
+    let remotePath = "/"
+    if (breadcrumb.value.length > 0) {
+      remotePath += breadcrumb.value.map(b => b.name).join('/')
+    }
+    
+    const result = await scanDirectory({
+      remote_path: remotePath,
+      local_path: strmForm.localPath,
+      recursive: strmForm.recursive,
+      base_url: strmForm.baseUrl,
+      strm_url_mode: strmForm.strmUrlMode
+    })
+    
+    ElMessage.success(`生成成功: ${result.count} 个文件`)
+    strmDialogVisible.value = false
+  } catch (e) {
+    ElMessage.error('生成失败: ' + String(e))
+  } finally {
+    scanning.value = false
   }
 }
 
