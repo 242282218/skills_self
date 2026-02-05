@@ -104,8 +104,6 @@ const menuItems = [
   { path: '/dashboard', title: '概览', icon: 'Odometer' },
   { path: '/search', title: '资源搜索', icon: 'Search' },
   { path: '/smart-rename', title: '智能重命名', icon: 'EditPen' },
-  { path: '/cloud', title: '云盘管理', icon: 'Cloudy' },
-  { path: '/files', title: '文件管理', icon: 'Folder' },
   { path: '/tasks', title: '任务管理', icon: 'List' },
   { path: '/config', title: '系统配置', icon: 'Setting' }
 ]

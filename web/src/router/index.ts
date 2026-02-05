@@ -23,12 +23,6 @@ const router = createRouter({
           meta: { title: '概览', icon: 'Odometer' }
         },
         {
-          path: '/files',
-          name: 'Files',
-          component: () => import('@/views/CloudView.vue'),
-          meta: { title: '文件管理', icon: 'Folder' }
-        },
-        {
           path: '/tasks',
           name: 'Tasks',
           component: () => import('@/views/TasksView.vue'),
